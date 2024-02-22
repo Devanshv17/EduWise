@@ -1,5 +1,3 @@
-// main.go
-
 package main
 
 import (
@@ -49,7 +47,7 @@ func main() {
 
 	r.GET("/api/fetch", fetchFiles)
 
-	if err := r.Run(":8080"); err != nil {
+	if err := r.Run("0.0.0.0:8080"); err != nil {
 		log.Fatalf("Failed to run server: %v", err)
 	}
 }
