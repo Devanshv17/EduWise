@@ -26,8 +26,8 @@ func main() {
 		log.Fatal(err)
 	}
 	defer client.Disconnect(ctx)
-	db := client.Database("your_database_name")
-	collection = db.Collection("your_collection_name")
+	db := client.Database("CoursesInfo")
+	collection = db.Collection("details")
 
 	r := gin.Default()
 
@@ -56,7 +56,11 @@ func fetchFiles(c *gin.Context) {
 	// Define a struct to represent the data model
 	type File struct {
 		CourseName string `json:"courseName" bson:"courseName"`
-		Year       string `json:"year" bson:"year"`
+		Batch      string `json:"batch" bson:"batch"`
+		Instructor string `json:"instructor" bson:"instructor"`
+		Type       string `json:"type" bson:"type"`
+		Detail     string `json:"detail" bson:"detail"`
+		Remark     string `json:"remark" bson:"remark"`
 		Photo      string `json:"photo" bson:"photo"`
 	}
 
@@ -106,10 +110,22 @@ func uploadFile(c *gin.Context) {
 
 	// Retrieve other form data
 	courseName := c.PostForm("courseName")
-	year := c.PostForm("year")
+	batch := c.PostForm("batch")
+	instructor := c.PostForm("instructor")
+	fileType := c.PostForm("type")
+	detail := c.PostForm("detail")
+	remark := c.PostForm("remark")
 
 	// Store course info and file path in MongoDB
-	_, err = collection.InsertOne(ctx, bson.M{"courseName": courseName, "year": year, "photo": filename})
+	_, err = collection.InsertOne(ctx, bson.M{
+		"courseName": courseName,
+		"batch":      batch,
+		"instructor": instructor,
+		"type":       fileType,
+		"detail":     detail,
+		"remark":     remark,
+		"photo":      filename,
+	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store data in database"})
 		return
