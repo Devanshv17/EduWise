@@ -6,10 +6,10 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
@@ -20,12 +20,14 @@ var courseCollection *mongo.Collection
 var ctx = context.TODO()
 
 type File struct {
+	ID          string `json:"id" bson:"_id"`
 	CourseName  string `json:"courseName" bson:"courseName"`
 	Batch       string `json:"batch" bson:"batch"`
 	Instructor  string `json:"instructor" bson:"instructor"`
 	Type        string `json:"type" bson:"type"`
 	Remark      string `json:"remark" bson:"remark"`
 	FileContent []byte `json:"fileContent" bson:"fileContent"`
+	Link        string `json:"link" bson:"link"`
 }
 
 type Faculty struct {
@@ -52,7 +54,7 @@ func main() {
 	facultyDB := client.Database("FacultyInfo")
 	facultyCollection = facultyDB.Collection("details")
 
-	courseDB := client.Database("ListofCourse") // Assuming you have a database named "ListofCourse"
+	courseDB := client.Database("ListofCourse")
 	courseCollection = courseDB.Collection("details")
 
 	r := gin.Default()
@@ -74,11 +76,66 @@ func main() {
 	r.POST("/api/faculty", uploadFaculty)
 	r.POST("/api/courses", uploadCourse)
 	r.GET("/api/courses", fetchCourses)
-	r.GET("/api/download/:courseName", downloadFile)
 
 	if err := r.Run("0.0.0.0:8080"); err != nil {
 		log.Fatalf("Failed to run server: %v", err)
 	}
+}
+
+func generateFileLink(fileID string) string {
+	// Assuming your frontend is hosted at http://localhost:3000
+	return fmt.Sprintf("http://localhost:3000/files/%s", fileID)
+}
+
+func uploadFile(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Open uploaded file
+	fileContent, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open uploaded file"})
+		return
+	}
+	defer fileContent.Close()
+
+	// Read file content
+	content, err := ioutil.ReadAll(fileContent)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file content"})
+		return
+	}
+
+	// Generate a unique identifier for the file
+
+	fileID := primitive.NewObjectID().Hex()
+
+	courseName := c.PostForm("courseName")
+	batch := c.PostForm("batch")
+	instructor := c.PostForm("instructor")
+	fileType := c.PostForm("type")
+	remark := c.PostForm("remark")
+
+	// Store file content and other details in the database
+	_, err = collection.InsertOne(ctx, bson.M{
+		"_id":         fileID, // Store the unique identifier
+		"courseName":  courseName,
+		"batch":       batch,
+		"instructor":  instructor,
+		"type":        fileType,
+		"remark":      remark,
+		"fileContent": content,                  // Store file content
+		"link":        generateFileLink(fileID), // Store the generated link
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store data in database"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Upload successful"})
 }
 
 func fetchFiles(c *gin.Context) {
@@ -106,74 +163,23 @@ func fetchFiles(c *gin.Context) {
 		return
 	}
 
-	// Instead of returning JSON response, return a HTML response with links to download files
-	var links []string
-	for _, file := range files {
-		link := fmt.Sprintf("<a href=\"/api/download/%s\">%s</a><br>", file.CourseName, file.CourseName)
-		links = append(links, link)
-	}
-
-	html := strings.Join(links, "")
-	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(html))
+	c.JSON(http.StatusOK, files)
 }
 
-func downloadFile(c *gin.Context) {
-	courseName := c.Param("courseName")
-
-	var file File
-	err := collection.FindOne(ctx, bson.M{"courseName": courseName}).Decode(&file)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find file"})
-		return
-	}
-
-	c.Header("Content-Disposition", "attachment; filename="+file.CourseName)
-	c.Data(http.StatusOK, "application/octet-stream", file.FileContent)
-}
-
-func uploadFile(c *gin.Context) {
-	file, err := c.FormFile("file")
-	if err != nil {
+func uploadFaculty(c *gin.Context) {
+	var faculty Faculty
+	if err := c.ShouldBindJSON(&faculty); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Open uploaded file
-	fileContent, err := file.Open()
+	_, err := facultyCollection.InsertOne(ctx, faculty)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open uploaded file"})
-		return
-	}
-	defer fileContent.Close()
-
-	// Read file content
-	content, err := ioutil.ReadAll(fileContent)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file content"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store faculty data in database"})
 		return
 	}
 
-	courseName := c.PostForm("courseName")
-	batch := c.PostForm("batch")
-	instructor := c.PostForm("instructor")
-	fileType := c.PostForm("type")
-	remark := c.PostForm("remark")
-
-	// Store file content and other details in the database
-	_, err = collection.InsertOne(ctx, bson.M{
-		"courseName":  courseName,
-		"batch":       batch,
-		"instructor":  instructor,
-		"type":        fileType,
-		"remark":      remark,
-		"fileContent": content, // Store file content
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store data in database"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Upload successful"})
+	c.JSON(http.StatusOK, gin.H{"message": "Faculty data uploaded successfully"})
 }
 
 func fetchFaculty(c *gin.Context) {
@@ -203,20 +209,20 @@ func fetchFaculty(c *gin.Context) {
 	c.JSON(http.StatusOK, faculties)
 }
 
-func uploadFaculty(c *gin.Context) {
-	var faculty Faculty
-	if err := c.ShouldBindJSON(&faculty); err != nil {
+func uploadCourse(c *gin.Context) {
+	var course Course // Assuming you have a struct definition for Course similar to Faculty
+	if err := c.ShouldBindJSON(&course); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	_, err := facultyCollection.InsertOne(ctx, faculty)
+	_, err := courseCollection.InsertOne(ctx, course)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store faculty data in database"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store course data in database"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Faculty data uploaded successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Course data uploaded successfully"})
 }
 
 func fetchCourses(c *gin.Context) {
@@ -244,20 +250,4 @@ func fetchCourses(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, courses)
-}
-
-func uploadCourse(c *gin.Context) {
-	var course Course // Assuming you have a struct definition for Course similar to Faculty
-	if err := c.ShouldBindJSON(&course); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	_, err := courseCollection.InsertOne(ctx, course)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store course data in database"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Course data uploaded successfully"})
 }

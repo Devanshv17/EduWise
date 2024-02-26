@@ -8,7 +8,6 @@ interface UploadedFile {
     photo: string;
     instructor: string;
     type: string;
-    detail: string;
     remark: string;
 }
 
@@ -49,7 +48,6 @@ const IndexPage: React.FC = () => {
     const filteredFiles = currentFiles.filter(file =>
         file.courseName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         file.type.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        file.detail.toLowerCase().includes(searchQuery.toLowerCase()) ||
         file.instructor.toLowerCase().includes(searchQuery.toLowerCase()) ||
         file.batch.toLowerCase().includes(searchQuery.toLowerCase()) ||
         file.remark.toLowerCase().includes(searchQuery.toLowerCase())
@@ -84,7 +82,7 @@ const IndexPage: React.FC = () => {
                         <img src={`/uploads/${file.photo}`} alt={file.courseName} className="w-full h-auto" />
                         <div className="text-center mt-2">
                             <h2 className="text-base text-gray-700 font-semibold">{file.courseName}</h2>
-                            <p className="text-gray-500 text-xs">{file.type}, {file.detail}</p>
+                            <p className="text-gray-500 text-xs">{file.type}</p>
                             <p className="text-gray-500 text-xs">Instructor: {file.instructor}, Batch: {file.batch}</p>
                             <p className="text-gray-500 text-xs">Remark: {file.remark}</p>
                         </div>
