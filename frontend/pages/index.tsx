@@ -12,7 +12,7 @@ interface UploadedFile {
 }
 
 const IndexPage: React.FC = () => {
-    const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+    const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[] | null>(null); // Initialize with null
     const [showUploadForm, setShowUploadForm] = useState(false);
     const [currentPage, setCurrentPage] = useState(1);
     const [searchQuery, setSearchQuery] = useState('');
@@ -37,7 +37,7 @@ const IndexPage: React.FC = () => {
 
     const indexOfLastFile = currentPage * filesPerPage;
     const indexOfFirstFile = indexOfLastFile - filesPerPage;
-    const currentFiles = uploadedFiles.slice(indexOfFirstFile, indexOfLastFile);
+    const currentFiles = uploadedFiles?.slice(indexOfFirstFile, indexOfLastFile) || []; // Null check
 
     const paginate = (pageNumber: number) => setCurrentPage(pageNumber);
 
@@ -55,15 +55,15 @@ const IndexPage: React.FC = () => {
 
     return (
         <div className="container mx-auto mt-8 relative">
-            <h1 className="text-6xl py-4 font-bold text-center mb-4">STUDHELP-IITK</h1> {/* Heading added here */}
+            <h1 className="text-6xl py-4 font-bold text-center mb-4">STUDHELP-IITK</h1>
             <div className="mb-8 text-right">
-            <input
-                type="text"
-                placeholder="Search..."
-                value={searchQuery}
-                onChange={handleSearch}
-                className="border text-black border-gray-300 rounded-full px-4 py-2 mx-auto block max-w-3xl w-full"
-            />
+                <input
+                    type="text"
+                    placeholder="Search..."
+                    value={searchQuery}
+                    onChange={handleSearch}
+                    className="border text-black border-gray-300 rounded-full px-4 py-2 mx-auto block max-w-3xl w-full"
+                />
 
                 <button onClick={handleToggleForm} className="bg-blue-500 text-white py-2 px-4 rounded-md hover:bg-blue-600 transition duration-300">
                     {showUploadForm ? 'Close Form' : 'Upload Files'}
@@ -92,7 +92,7 @@ const IndexPage: React.FC = () => {
 
             {/* Pagination */}
             <ul className="flex justify-center mt-8">
-                {Array.from({ length: Math.ceil(uploadedFiles.length / filesPerPage) }, (_, i) => (
+                {Array.from({ length: Math.ceil((uploadedFiles?.length || 0) / filesPerPage) }, (_, i) => (
                     <li key={i}>
                         <button
                             onClick={() => paginate(i + 1)}
