@@ -76,6 +76,7 @@ func main() {
 	r.POST("/api/faculty", uploadFaculty)
 	r.POST("/api/courses", uploadCourse)
 	r.GET("/api/courses", fetchCourses)
+	r.GET("/api/download/:fileID", downloadFile)
 
 	if err := r.Run("0.0.0.0:8080"); err != nil {
 		log.Fatalf("Failed to run server: %v", err)
@@ -84,7 +85,7 @@ func main() {
 
 func generateFileLink(fileID string) string {
 	// Assuming your frontend is hosted at http://localhost:3000
-	return fmt.Sprintf("http://localhost:3000/files/%s", fileID)
+	return fmt.Sprintf("http://localhost:8080/api/download/%s?download=true", fileID)
 }
 
 func uploadFile(c *gin.Context) {
@@ -164,6 +165,22 @@ func fetchFiles(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, files)
+}
+
+func downloadFile(c *gin.Context) {
+	fileID := c.Param("fileID")
+
+	// Fetch file details from the database using the fileID
+	var file File
+	err := collection.FindOne(ctx, bson.M{"_id": fileID}).Decode(&file)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	// Set the appropriate headers for file download
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", file.ID))
+	c.Data(http.StatusOK, "application/octet-stream", file.FileContent)
 }
 
 func uploadFaculty(c *gin.Context) {
