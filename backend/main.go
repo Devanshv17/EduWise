@@ -6,18 +6,37 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"time"
 
+	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"golang.org/x/crypto/bcrypt"
 )
 
-var collection *mongo.Collection
-var facultyCollection *mongo.Collection
-var courseCollection *mongo.Collection
-var ctx = context.TODO()
+var (
+	collection        *mongo.Collection
+	facultyCollection *mongo.Collection
+	courseCollection  *mongo.Collection
+	registeredUsers   *mongo.Collection
+	ctx               = context.TODO()
+	jwtKey            = []byte("3J&59#sM%5D+^!Y$BXu@2pPw@sn#ZjF")
+)
+
+// Claims structure for JWT token
+type Claims struct {
+	Username string `json:"username"`
+	jwt.StandardClaims
+}
+
+type UserRegistration struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+	// Add any additional fields for registration such as email, name, etc.
+}
 
 type File struct {
 	ID          string `json:"id" bson:"_id"`
@@ -57,6 +76,9 @@ func main() {
 	courseDB := client.Database("ListofCourse")
 	courseCollection = courseDB.Collection("details")
 
+	registerDB := client.Database("Userdata")
+	registeredUsers = registerDB.Collection("registered_users")
+
 	r := gin.Default()
 
 	r.Use(func(c *gin.Context) {
@@ -76,6 +98,10 @@ func main() {
 	r.POST("/api/faculty", uploadFaculty)
 	r.POST("/api/courses", uploadCourse)
 	r.GET("/api/courses", fetchCourses)
+	r.POST("/api/login", login)
+	r.POST("/api/register", register)
+	r.GET("/api/isLoggedIn", isLoggedIn)
+	r.GET("/api/main", isAuthenticated, isLoggedIn, mainPageHandler)
 	r.GET("/api/download/:fileID", downloadFile)
 
 	if err := r.Run("0.0.0.0:8080"); err != nil {
@@ -276,4 +302,154 @@ func fetchCourses(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, courses)
+}
+
+func register(c *gin.Context) {
+	var user UserRegistration
+	if err := c.BindJSON(&user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Check if the username already exists in the database
+	count, err := registeredUsers.CountDocuments(ctx, bson.M{"username": user.Username})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check username availability"})
+		return
+	}
+	if count > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Username already exists"})
+		return
+	}
+
+	// Hash the password before storing it in the database
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+		return
+	}
+
+	// Store user registration data in the new collection
+	_, err = registeredUsers.InsertOne(ctx, bson.M{
+		"username": user.Username,
+		"password": string(hashedPassword), // Store hashed password as a string
+		// Add additional fields as needed
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register user"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
+}
+
+func login(c *gin.Context) {
+	var user struct {
+		Username string `json:"username" binding:"required"`
+		Password string `json:"password" binding:"required"`
+	}
+
+	if err := c.BindJSON(&user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Query the database to find the user by username
+	var dbUser UserRegistration
+	err := registeredUsers.FindOne(ctx, bson.M{"username": user.Username}).Decode(&dbUser)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+		return
+	}
+
+	// Compare the provided password with the hashed password from the database
+	if err := bcrypt.CompareHashAndPassword([]byte(dbUser.Password), []byte(user.Password)); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+		return
+	}
+
+	// Generate JWT token
+	tokenString, err := generateJWT(user.Username)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate JWT token"})
+		return
+	}
+
+	// Return JWT token to the client
+	c.JSON(http.StatusOK, gin.H{"token": tokenString})
+}
+
+func isLoggedIn(c *gin.Context) {
+	// Retrieve the JWT token from the Authorization header
+	tokenString := c.GetHeader("Authorization")
+	if tokenString == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authorization token"})
+		c.Abort()
+		return
+	}
+
+	// Parse the JWT token
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		return jwtKey, nil
+	})
+	if err != nil || !token.Valid {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authorization token"})
+		c.Abort()
+		return
+	}
+
+	// Token is valid, user is logged in
+	c.JSON(http.StatusOK, gin.H{"isLoggedIn": true})
+}
+
+func isAuthenticated(c *gin.Context) {
+	// Retrieve the JWT token from the Authorization header
+	tokenString := c.GetHeader("Authorization")
+	if tokenString == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Missing authorization token"})
+		c.Abort()
+		return
+	}
+
+	// Parse the JWT token
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		return jwtKey, nil
+	})
+	if err != nil || !token.Valid {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid authorization token"})
+		c.Abort()
+		return
+	}
+
+	// Proceed with the request
+	c.Next()
+}
+
+// Function to generate JWT token
+func generateJWT(username string) (string, error) {
+	expirationTime := time.Now().Add(7 * 24 * time.Hour) // Token valid for 7 days
+
+	claims := &Claims{
+		Username: username,
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: expirationTime.Unix(),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString(jwtKey)
+	if err != nil {
+		return "", err
+	}
+
+	return tokenString, nil
+}
+
+// Modify your main page handler function according to your needs
+func mainPageHandler(c *gin.Context) {
+	// Retrieve user information from the context
+	username, _ := c.Get("username")
+
+	// Your main page logic goes here
+	c.JSON(http.StatusOK, gin.H{"message": "Welcome to the main page", "username": username})
 }
