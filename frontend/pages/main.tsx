@@ -18,11 +18,14 @@ const MainPage: React.FC = () => {
     const [showUploadForm, setShowUploadForm] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
+    const [filteredFiles, setFilteredFiles] = useState<UploadedFile[]>([]); // Added state for filtered files
+    const [username, setUsername] = useState<string>(''); // Added state for username
     const filesPerPage = 12;
     const router = useRouter();
 
     useEffect(() => {
         fetchUploadedFiles(); // Fetch files when the component mounts
+        setUsername(getUsernameFromToken()); // Set the username when the component mounts
     }, []);
 
     const fetchUploadedFiles = async () => {
@@ -30,6 +33,7 @@ const MainPage: React.FC = () => {
             const response = await axios.get<UploadedFile[]>('http://localhost:8080/api/fetch');
             if (response.status === 200) {
                 setUploadedFiles(response.data);
+                setFilteredFiles(response.data); // Initialize filteredFiles state with all files
             } else {
                 console.error('Error fetching uploaded files:', response.statusText);
             }
@@ -38,20 +42,40 @@ const MainPage: React.FC = () => {
         }
     };
 
-    const filteredFiles = uploadedFiles.filter(file =>
-        file.courseName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        file.type.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        file.instructor.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        file.batch.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        file.remark.toLowerCase().includes(searchQuery.toLowerCase())
-    );
+    const getUsernameFromToken = () => {
+        const token = localStorage.getItem('token');
+        if (token) {
+            const tokenPayload = JSON.parse(atob(token.split('.')[1]));
+            return tokenPayload.username;
+        }
+        return '';
+    };
+
+    const handleLogout = () => {
+        // Clear token from localStorage
+        localStorage.removeItem('token');
+        // Redirect to login page
+        router.push('/login');
+    };
 
     const handleToggleForm = () => {
         setShowUploadForm(!showUploadForm);
     };
 
     const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setSearchQuery(e.target.value);
+        const query = e.target.value;
+        setSearchQuery(query);
+        setFilteredFiles(filterFiles(query, uploadedFiles));
+    };
+
+    const filterFiles = (query: string, files: UploadedFile[]) => {
+        return files.filter(file =>
+            file.courseName.toLowerCase().includes(query.toLowerCase()) ||
+            file.type.toLowerCase().includes(query.toLowerCase()) ||
+            file.instructor.toLowerCase().includes(query.toLowerCase()) ||
+            file.batch.toLowerCase().includes(query.toLowerCase()) ||
+            file.remark.toLowerCase().includes(query.toLowerCase())
+        );
     };
 
     // Add a function to check if the user is authenticated
@@ -67,8 +91,9 @@ const MainPage: React.FC = () => {
         }
     }, []);
 
-    const indexOfLastFile = currentPage * filesPerPage;
-    const indexOfFirstFile = indexOfLastFile - filesPerPage;
+    const indexOfLastFile = Math.min(currentPage * filesPerPage, filteredFiles.length);
+    const indexOfFirstFile = Math.min(indexOfLastFile - filesPerPage, filteredFiles.length);
+
     const currentFiles = filteredFiles.slice(indexOfFirstFile, indexOfLastFile);
 
     const maxPages = Math.ceil(filteredFiles.length / filesPerPage);
@@ -83,6 +108,17 @@ const MainPage: React.FC = () => {
     return (
         <div className="container mx-auto mt-8 relative">
             <h1 className="text-6xl py-4 font-bold text-center mb-4">STUDHELP-IITK</h1>
+            <div className="flex justify-between items-center mb-4">
+                <div>
+                    <span className="text-gray-600">Welcome, {username}!</span>
+                </div>
+                <button
+                    onClick={handleLogout}
+                    className="bg-red-500 text-white py-2 px-4 rounded-md hover:bg-red-600 transition duration-300"
+                >
+                    Logout
+                </button>
+            </div>
             <div className="mb-8 text-right">
                 <input
                     type="text"
