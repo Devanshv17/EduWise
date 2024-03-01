@@ -1,12 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math/rand"
 	"net/http"
+	"os"
+	"strconv"
 	"time"
+
+	"net/smtp"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/gin-gonic/gin"
@@ -33,8 +40,10 @@ type Claims struct {
 }
 
 type UserRegistration struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Username   string `json:"username" binding:"required"`
+	Password   string `json:"password" binding:"required"`
+	IsVerified bool   `json:"isVerified"`
+	OTP        string `json:"otp"`
 	// Add any additional fields for registration such as email, name, etc.
 }
 
@@ -58,7 +67,10 @@ type Course struct {
 }
 
 func main() {
-	client, err := mongo.NewClient(options.Client().ApplyURI("mongodb+srv://devanshv22:StudHelp@cluster0.adahnkt.mongodb.net/?retryWrites=true&w=majority"))
+
+	mongoURI := os.Getenv("MONGO_URI")
+
+	client, err := mongo.NewClient(options.Client().ApplyURI(mongoURI))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -84,7 +96,7 @@ func main() {
 	r.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, username") // Include 'username' header
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
 			return
@@ -100,6 +112,7 @@ func main() {
 	r.GET("/api/courses", fetchCourses)
 	r.POST("/api/login", login)
 	r.POST("/api/register", register)
+	r.POST("/api/verify", verifyOTP)
 	r.GET("/api/isLoggedIn", isLoggedIn)
 	r.GET("/api/main", isAuthenticated, isLoggedIn, mainPageHandler)
 	r.GET("/api/download/:fileID", downloadFile)
@@ -115,6 +128,9 @@ func generateFileLink(fileID string) string {
 }
 
 func uploadFile(c *gin.Context) {
+	// Extract the username from the request headers
+	username := c.GetHeader("username")
+
 	file, err := c.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -137,7 +153,6 @@ func uploadFile(c *gin.Context) {
 	}
 
 	// Generate a unique identifier for the file
-
 	fileID := primitive.NewObjectID().Hex()
 
 	courseName := c.PostForm("courseName")
@@ -146,9 +161,10 @@ func uploadFile(c *gin.Context) {
 	fileType := c.PostForm("type")
 	remark := c.PostForm("remark")
 
-	// Store file content and other details in the database
+	// Store file content and other details in the database along with the username
 	_, err = collection.InsertOne(ctx, bson.M{
 		"_id":         fileID, // Store the unique identifier
+		"username":    username,
 		"courseName":  courseName,
 		"batch":       batch,
 		"instructor":  instructor,
@@ -164,6 +180,8 @@ func uploadFile(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"message": "Upload successful"})
 }
+
+// Function to extract the username from the JWT token
 
 func fetchFiles(c *gin.Context) {
 	type FileWithoutContent struct {
@@ -322,6 +340,10 @@ func register(c *gin.Context) {
 		return
 	}
 
+	// Generate a random 6-digit OTP
+	rand.Seed(time.Now().UnixNano())
+	otp := strconv.Itoa(rand.Intn(900000) + 100000) // Generates a random number between 100000 and 999999
+
 	// Hash the password before storing it in the database
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -329,18 +351,102 @@ func register(c *gin.Context) {
 		return
 	}
 
-	// Store user registration data in the new collection
+	// Store user registration data in the database along with the OTP
 	_, err = registeredUsers.InsertOne(ctx, bson.M{
-		"username": user.Username,
-		"password": string(hashedPassword), // Store hashed password as a string
-		// Add additional fields as needed
+		"username":   user.Username,
+		"password":   string(hashedPassword),
+		"isVerified": false,
+		"otp":        otp,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to register user"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully"})
+	// Send OTP to the user's email address
+	if err := sendVerificationOTP(user.Username, otp); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification OTP"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "User registered successfully. Please verify your email to activate your account"})
+}
+
+func verifyOTP(c *gin.Context) {
+	type OTPRequest struct {
+		Username string `json:"username" binding:"required"`
+		OTP      string `json:"otp" binding:"required"`
+	}
+
+	var req OTPRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Query the database to find the user by username
+	var dbUser UserRegistration
+	err := registeredUsers.FindOne(ctx, bson.M{"username": req.Username}).Decode(&dbUser)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	// Check if the provided OTP matches the stored OTP
+	if req.OTP != dbUser.OTP {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid OTP"})
+		return
+	}
+
+	// Update the user's verification status to true
+	_, err = registeredUsers.UpdateOne(ctx, bson.M{"username": req.Username}, bson.M{"$set": bson.M{"isVerified": true}})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify OTP"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "OTP verified successfully"})
+}
+
+func sendVerificationOTP(email, otp string) error {
+	// SMTP configuration
+	smtpHost := "mmtp.iitk.ac.in"
+	smtpPort := 25
+	smtpUsername := os.Getenv("SMTP_USERNAME")
+	smtpPassword := os.Getenv("SMTP_PASSWORD")
+	// Sender and recipient email addresses
+	from := "StudHelp-IITK@iitk.ac.in"
+	to := email
+
+	// Email content
+	subject := "Account Verification OTP"
+	body := fmt.Sprintf("Dear User your verification OTP is: %s", otp)
+
+	// Constructing email headers
+	headers := make(map[string]string)
+	headers["From"] = from
+	headers["To"] = to
+	headers["Subject"] = subject
+	headers["MIME-Version"] = "1.0"
+	headers["Content-Type"] = "text/plain; charset=\"utf-8\""
+	headers["Content-Transfer-Encoding"] = "base64"
+
+	var msg bytes.Buffer
+	for key, value := range headers {
+		msg.WriteString(key + ": " + value + "\r\n")
+	}
+	msg.WriteString("\r\n" + base64.StdEncoding.EncodeToString([]byte(body)))
+
+	// SMTP authentication
+	auth := smtp.PlainAuth("", smtpUsername, smtpPassword, smtpHost)
+
+	// Sending email using SMTP
+	err := smtp.SendMail(fmt.Sprintf("%s:%d", smtpHost, smtpPort), auth, from, []string{to}, msg.Bytes())
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func login(c *gin.Context) {
@@ -359,6 +465,12 @@ func login(c *gin.Context) {
 	err := registeredUsers.FindOne(ctx, bson.M{"username": user.Username}).Decode(&dbUser)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+		return
+	}
+
+	// Check if the user is verified
+	if !dbUser.IsVerified {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Account not verified. Please check your email for verification instructions."})
 		return
 	}
 

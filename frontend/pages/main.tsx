@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import UploadForm from '../components/UploadForm';
+import ProfileSection from '../components/ProfileSection';
 import { useRouter } from 'next/router';
 
 interface UploadedFile {
@@ -32,8 +33,8 @@ const MainPage: React.FC = () => {
         try {
             const response = await axios.get<UploadedFile[]>('http://localhost:8080/api/fetch');
             if (response.status === 200) {
-                setUploadedFiles(response.data);
-                setFilteredFiles(response.data); // Initialize filteredFiles state with all files
+                setUploadedFiles(response.data || []);
+                setFilteredFiles(response.data || []); // Initialize filteredFiles state with all files
             } else {
                 console.error('Error fetching uploaded files:', response.statusText);
             }
@@ -107,18 +108,13 @@ const MainPage: React.FC = () => {
 
     return (
         <div className="container mx-auto mt-8 relative">
-            <h1 className="text-6xl py-4 font-bold text-center mb-4">STUDHELP-IITK</h1>
-            <div className="flex justify-between items-center mb-4">
-                <div>
-                    <span className="text-gray-600">Welcome, {username}!</span>
-                </div>
-                <button
-                    onClick={handleLogout}
-                    className="bg-red-500 text-white py-2 px-4 rounded-md hover:bg-red-600 transition duration-300"
-                >
-                    Logout
-                </button>
+            <div className="flex justify-between items-center">
+            <h1 className="text-6xl py-4 font-bold text-center mb-4 flex-grow">STUDHELP-IITK</h1>
+            <div>
+                <ProfileSection username={username} handleLogout={handleLogout} />
             </div>
+            </div>
+
             <div className="mb-8 text-right">
                 <input
                     type="text"
@@ -135,7 +131,8 @@ const MainPage: React.FC = () => {
 
             {showUploadForm && (
                 <div className="fixed inset-0 flex items-center justify-center bg-gray-900 bg-opacity-50 bg-white p-8 rounded-2xl shadow-lg">
-                    <UploadForm fetchUploadedFiles={fetchUploadedFiles} onClose={() => setShowUploadForm(false)} />
+                    
+                    <UploadForm username={username} fetchUploadedFiles={fetchUploadedFiles} onClose={() => setShowUploadForm(false)} />
                 </div>
             )}
 

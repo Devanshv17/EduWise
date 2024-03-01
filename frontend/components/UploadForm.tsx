@@ -2,21 +2,22 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import Select from 'react-select';
 import NewInstructorPopup from './NewInstructor';
-import NewCoursePopup from './NewCourse';// Import the NewCoursePopup component
+import NewCoursePopup from './NewCourse'; // Import the NewCoursePopup component
 
 interface UploadFormProps {
     fetchUploadedFiles: () => void;
     onClose: () => void; // Function to close the form
+    username: string; // Add username prop
 }
 
-const UploadForm: React.FC<UploadFormProps> = ({ fetchUploadedFiles, onClose }) => {
+const UploadForm: React.FC<UploadFormProps> = ({ fetchUploadedFiles, onClose, username }) => {
     const [courseName, setCourseName] = useState('');
     const [batch, setBatch] = useState('');
     const [instructor, setInstructor] = useState<string | null>(null);
     const [type, setType] = useState('');
     const [detail, setDetail] = useState('');
     const [remark, setRemark] = useState('');
-    const [file, setfile] = useState<File | null>(null);
+    const [file, setFile] = useState<File | null>(null);
     const [facultyOptions, setFacultyOptions] = useState<any[]>([]);
     const [courseOptions, setCourseOptions] = useState<any[]>([]); // State for course options
     const [filteredFacultyOptions, setFilteredFacultyOptions] = useState<any[]>([]);
@@ -61,7 +62,7 @@ const UploadForm: React.FC<UploadFormProps> = ({ fetchUploadedFiles, onClose }) 
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files) {
-            setfile(e.target.files[0]);
+            setFile(e.target.files[0]);
         }
     };
 
@@ -121,7 +122,7 @@ const UploadForm: React.FC<UploadFormProps> = ({ fetchUploadedFiles, onClose }) 
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-
+    
         const formData = new FormData();
         formData.append('courseName', courseName);
         formData.append('batch', batch);
@@ -132,11 +133,13 @@ const UploadForm: React.FC<UploadFormProps> = ({ fetchUploadedFiles, onClose }) 
         if (file) {
             formData.append('file', file);
         }
-
+    
         try {
             await axios.post('http://localhost:8080/api/upload', formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`, // Include JWT token in headers
+                    'username': username // Include username in headers
                 },
             });
             alert('Upload successful!');
@@ -146,6 +149,7 @@ const UploadForm: React.FC<UploadFormProps> = ({ fetchUploadedFiles, onClose }) 
             console.error(error);
         }
     };
+    
 
     return (
         <div>
@@ -229,40 +233,38 @@ const UploadForm: React.FC<UploadFormProps> = ({ fetchUploadedFiles, onClose }) 
                         <div className="w-1/2">
                             <label className="block text-gray-500 mb-2">Type:</label>
                             <Select
-                        options={[
-                            { value: '', label: 'Select Type' },
-                            { value: 'Midsem', label: 'Midsem' },
-                            { value: 'Endsem', label: 'Endsem' },
-                            { value: 'Quiz', label: 'Quiz' },
-                            { value: 'Lecture Note', label: 'Lecture Note' },
-                            { value: 'Assignments', label: 'Assignments' }
-                        ]}
-                        value={type ? { value: type, label: type } : null}
-                        onChange={(selectedOption) => {
-                            if (selectedOption) {
-                                setType(selectedOption.value);
-                            }
-                        }}
-                        className="w-full rounded-md focus:outline-none focus:border-blue-500 text-black"
-                        styles={{
-                            control: (provided) => ({
-                                ...provided,
-                                borderColor: '#cbd5e0', // Border color
-                            }),
-                            option: (provided, state) => ({
-                                ...provided,
-                                backgroundColor: state.isSelected ? '#3182ce' : 'white',
-                                color: state.isSelected ? 'white' : 'black',
-                                ':hover': {
-                                    backgroundColor: '#3182ce',
-                                    color: 'white',
-                                },
-                            }),
-                        }}
-                    />
-
+                                options={[
+                                    { value: '', label: 'Select Type' },
+                                    { value: 'Midsem', label: 'Midsem' },
+                                    { value: 'Endsem', label: 'Endsem' },
+                                    { value: 'Quiz', label: 'Quiz' },
+                                    { value: 'Lecture Note', label: 'Lecture Note' },
+                                    { value: 'Assignments', label: 'Assignments' }
+                                ]}
+                                value={type ? { value: type, label: type } : null}
+                                onChange={(selectedOption) => {
+                                    if (selectedOption) {
+                                        setType(selectedOption.value);
+                                    }
+                                }}
+                                className="w-full rounded-md focus:outline-none focus:border-blue-500 text-black"
+                                styles={{
+                                    control: (provided) => ({
+                                        ...provided,
+                                        borderColor: '#cbd5e0', // Border color
+                                    }),
+                                    option: (provided, state) => ({
+                                        ...provided,
+                                        backgroundColor: state.isSelected ? '#3182ce' : 'white',
+                                        color: state.isSelected ? 'white' : 'black',
+                                        ':hover': {
+                                            backgroundColor: '#3182ce',
+                                            color: 'white',
+                                        },
+                                    }),
+                                }}
+                            />
                         </div>
-
                     </div>
                     <div className="flex space-x-4">
                         <div className="w-1/2">
